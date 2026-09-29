@@ -1,4 +1,3 @@
-import render
 from datetime import timedelta
 
 class InkyDisplay:

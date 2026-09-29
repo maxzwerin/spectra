@@ -1,8 +1,5 @@
-# Everything (computer and Pi):
 pillow
 requests
 icalendar
 recurring-ical-events
-# Pi only, in addition:  pip install inky
-# Only if you use a Google sign-in (python main.py --auth) instead of ICS_FEEDS:
-#   google-auth google-auth-oauthlib
+emoji

@@ -18,26 +18,28 @@ def seconds_until_next_check() -> float:
     return min(config.CHECK_MINUTES * 60, (midnight - now).total_seconds() + 5)
 
 
-def refresh(source, display, shown: bytes | None) -> bytes:
+def refresh(source, display, shown: bytes | None, force: bool = False) -> bytes:
     """ fetch events and draw the picture in memory; only change it differs from current """
     today = date.today()
     events, calendars = source.events(today, today + timedelta(days=DAYS))
     panel = render(today, events, calendars)
-    if panel.tobytes() == shown:
+
+    if not force and panel.tobytes() == shown:
         return shown
     display.show(panel)
     return panel.tobytes()
 
 
 def run(source, display, button):
-    shown = None
+    shown, force = None, False
     while True:
         try:
-            shown = refresh(source, display, shown)
+            shown = refresh(source, display, shown, force)
             wait = seconds_until_next_check()
         except Exception as error:
             print(f"Update failed, retrying: {error}")
-        if button.wait(60):
+        force = button.wait(60)
+        if force:
             print("Button pressed, refreshing now")
 
 
