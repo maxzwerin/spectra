@@ -1,4 +1,3 @@
-import argparse
 from datetime import date, datetime, timedelta
 
 import config
@@ -19,7 +18,6 @@ def seconds_until_next_check() -> float:
 
 
 def refresh(source, display, shown: bytes | None, force: bool = False) -> bytes:
-    """ fetch events and draw the picture in memory; only change it differs from current """
     today = date.today()
     events, calendars = source.events(today, today + timedelta(days=DAYS))
     panel = render(today, events, calendars)
@@ -37,10 +35,11 @@ def run(source, display, button):
             shown = refresh(source, display, shown, force)
             wait = seconds_until_next_check()
         except Exception as error:
-            print(f"Update failed, retrying: {error}")
-        force = button.wait(60)
+            print("Update failed, retrying")
+            wait = 60
+        force = button.wait(wait)
         if force:
-            print("Button pressed, refreshing now")
+            print("Button pressed, refreshing")
 
 
 def main():
