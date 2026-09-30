@@ -43,7 +43,7 @@ class ICSFeeds:
 
         found, calendars = [], []
 
-        for feed in config.ICS_FEEDS:
+        for n, feed in enumerate(config.ICS_FEEDS):
 
             forced = feed.get("color") or None
             hex_color = HEX_FOR_INK.get(forced, DEFAULT_HEXES[n % len(DEFAULT_HEXES)])

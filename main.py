@@ -35,11 +35,8 @@ def run(source, display, button):
             shown = refresh(source, display, shown, force)
             wait = seconds_until_next_check()
         except Exception as error:
-            print("Update failed, retrying")
             wait = 60
         force = button.wait(wait)
-        if force:
-            print("Button pressed, refreshing")
 
 
 def main():
