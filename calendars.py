@@ -1,7 +1,6 @@
 from dataclasses import dataclass
 from datetime import date, datetime, time
 import re
-from urllib.parse import urlparse
 import emoji
 import config
 
@@ -10,7 +9,7 @@ import config
 class Calendar:
     id: str
     name: str
-    color: str
+    ink: str
 
 
 @dataclass
@@ -20,6 +19,7 @@ class Event:
     end: datetime
     all_day: bool
     calendar: str # Calendar.id
+    ink: str
 
 
 def at(day: date, hour: int = 0, minute: int = 0) -> datetime:
@@ -31,8 +31,8 @@ def clean(text: str) -> str:
     return re.sub(r"\s{2,}", " ", text).strip()
 
 
-DEFAULT_HEXES = ("#039be5", "#33b679", "#d50000", "#f6bf26")
-HEX_FOR_INK = {"blue": "#039be5", "green": "#33b679", "red": "#d50000", "yellow": "#f6bf26", "black": "#616161"}
+DEFAULT_INKS = ("blue", "green", "red", "yellow")
+VALID_INKS = {"black", "green", "blue", "red", "yellow"}  # "white" excluded: invisible on the page
 
 
 class ICSFeeds:
@@ -46,8 +46,8 @@ class ICSFeeds:
         for n, feed in enumerate(config.ICS_FEEDS):
 
             forced = feed.get("color") or None
-            hex_color = HEX_FOR_INK.get(forced, DEFAULT_HEXES[n % len(DEFAULT_HEXES)])
-            cal = Calendar(feed["url"], clean(feed["name"]), hex_color)
+            ink = forced if forced in VALID_INKS else DEFAULT_INKS[n % len(DEFAULT_INKS)]
+            cal = Calendar(feed["url"], clean(feed["name"]), ink)
             calendars.append(cal)
 
             response = requests.get(feed["url"], timeout=30)
@@ -64,7 +64,7 @@ class ICSFeeds:
 
                 title = clean(str(item.get("SUMMARY", "") or "")) or "(No title)"
 
-                found.append(Event(title, start, end_, all_day, cal.id))
+                found.append(Event(title, start, end_, all_day, cal.id, cal.ink))
 
         return found, calendars
 

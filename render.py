@@ -1,4 +1,3 @@
-import colorsys
 from datetime import date, datetime, timedelta
 from functools import lru_cache
 from pathlib import Path
@@ -8,49 +7,98 @@ from PIL import Image, ImageDraw, ImageFont
 import config
 from calendars import Calendar, Event, at
 
-SIZE = (800, 480)
-DAYS = 4
-MARGIN = 14
-COL_W = (SIZE[0] - 2 * MARGIN) // DAYS
-TOP, BOTTOM = 124, 470
-MORE_H = 22
+
 FONTS = Path(__file__).parent / "fonts"
 
-# Pure colors the panel is asked for. The order matches the original 7.3" driver's
-# palette indices; the newer (Spectra 6) driver matches by RGB value instead.
-INK = {"black": (0, 0, 0), "white": (255, 255, 255), "green": (0, 255, 0),
-       "blue": (0, 0, 255), "red": (255, 0, 0), "yellow": (255, 255, 0)}
+SIZE = (800, 480)
+DAYS = 4
 
-EVENT_INKS = ("blue", "green", "red", "yellow", "black")
-HUES = {"red": 0, "yellow": 55, "green": 130, "blue": 230}
+INK = {"black": (0, 0, 0), "white": (255, 255, 255), "green": (0, 255, 0), "blue": (0, 0, 255), "red": (255, 0, 0), "yellow": (255, 255, 0)}
+
+
+LAYOUT = {
+    "margin": 14,             # left/right page margin
+    "header_height": 80,      # page header (month + legend); day headers start below it
+    "day_header_height": 70,  # day name + number block; events start below it
+    "bottom_margin": 10,      # space left under the event area
+    "event_gap": 6,           # vertical space between events in a column
+    "column_inset": 6,        # gap between a column divider and the events on either side of it
+    "day_number_offset": 10,  # day number sits this far below the day name
+    "more_height": 22,        # room reserved for the "+N more" label
+    "more_inset": 4,          # left padding of the "+N more" label
+}
+
+FONT_SIZE = {
+    "month": 64,
+    "day_name": 15,
+    "day_number": 42,
+    "event_title": 15,
+    "event_time": 14,
+    "more": 14,
+    "legend": 14,
+}
+
+DIVIDER = {
+    "period": 8,    # distance from one dash to the next
+    "dash": 2,      # length of one dash
+}
+
+EVENT = {
+    "all_day_line_height": 19,
+    "all_day_pad_x": 8,
+    "all_day_pad_y": 5,
+    "timed_line_height": 19,
+    "timed_pad_y": 1,       # extra height below the time line
+    "bar_width": 5,
+    "bar_top_inset": 0,
+    "bar_bottom_inset": 3,
+    "text_indent": 12,      # text starts this far right of the bar's left edge
+    "max_lines": 2,
+    "compact_max_lines": 1,
+}
+
+LEGEND = {
+    "swatch": 14,
+    "swatch_radius": 3,
+    "swatch_outline": 2,
+    "swatch_text_gap": 6,
+    "item_gap": 16,
+    "name_max_width": 90,
+    "reserved_width": 300,
+    "center_y": 12,
+}
+
+COLUMN_WIDTH = (SIZE[0] - 2 * LAYOUT["margin"]) // DAYS
+EVENT_WIDTH = COLUMN_WIDTH - 2 * LAYOUT["column_inset"]
+EVENTS_TOP = LAYOUT["header_height"] + LAYOUT["day_header_height"]
+EVENTS_BOTTOM = SIZE[1] - LAYOUT["bottom_margin"]
 
 
 @lru_cache
-def font(size: int, bold: bool = False) -> ImageFont.FreeTypeFont:
+def serif(size: int) -> ImageFont.FreeTypeFont:
+    return ImageFont.truetype(str(FONTS / "InstrumentSerif-Regular.ttf"), size)
+
+
+@lru_cache
+def sans(size: int, bold: bool = False) -> ImageFont.FreeTypeFont:
     name = "Bold" if bold else "Regular"
     return ImageFont.truetype(str(FONTS / f"FiraSans-{name}.ttf"), size)
 
 
-def put(d, xy, text, fnt, ink="black", anchor="la"):
+def draw_text(d, xy, text, fnt, ink="black", anchor="la"):
     d.text(xy, text, font=fnt, fill=INK[ink], anchor=anchor)
 
 
 def wrap(text: str, fnt, width: int, max_lines: int) -> list[str]:
-    """Word-wrap `text` to `width` pixels, ending with an ellipsis if it doesn't fit."""
     lines, line = [], ""
     for word in text.split():
-        if fnt.getlength(f"{line} {word}".strip()) <= width:
-            line = f"{line} {word}".strip()
-            continue
-        if line:
-            lines.append(line)
-        line = word
-        while fnt.getlength(line) > width and len(line) > 1:  # a single over-long word
-            cut = len(line) - 1
-            while cut > 1 and fnt.getlength(line[:cut]) > width:
-                cut -= 1
-            lines.append(line[:cut])
-            line = line[cut:]
+        candidate = f"{line} {word}".strip()
+        if fnt.getlength(candidate) <= width:
+            line = candidate
+        else:
+            if line:
+                lines.append(line)
+            line = word
     lines.append(line)
     if len(lines) > max_lines:
         lines = lines[:max_lines]
@@ -61,146 +109,216 @@ def wrap(text: str, fnt, width: int, max_lines: int) -> list[str]:
     return lines
 
 
-# ------------------------------------------------------------ calendar colors
-
-def hue_gap(hex_color: str, ink: str) -> float:
-    """How far a Google color is from a panel color (lower = closer)."""
-    r, g, b = (int(hex_color[i:i + 2], 16) / 255 for i in (1, 3, 5))
-    hue, sat, _ = colorsys.rgb_to_hsv(r, g, b)
-    if ink == "black":
-        return 0 if sat < 0.2 else 200  # greys go to black, anything else only as a last resort
-    if sat < 0.2:
-        return 300
-    gap = abs(hue * 360 - HUES[ink])
-    return min(gap, 360 - gap)
-
-
-def assign_inks(calendars: list[Calendar]) -> dict[str, str]:
-    inks = {}
-    used = set(inks.values())
-    for cal in calendars:
-        if cal.id in inks:
-            continue
-        if len(used) >= len(EVENT_INKS):
-            used = set()  # every color taken: start a second round
-        free = [ink for ink in EVENT_INKS if ink not in used]
-        inks[cal.id] = min(free, key=lambda ink: hue_gap(cal.color, ink))
-        used.add(inks[cal.id])
-    return inks
+def column_x(index: int) -> int:
+    return LAYOUT["margin"] + index * COLUMN_WIDTH
 
 
 def text_on(ink: str) -> str:
-    return "black" if ink == "yellow" else "white"  # yellow is the only fill light enough for black text
+    return "black" if ink == "yellow" else "white"
 
 
-def key(d, x, cy, name, ink):
-    """Legend entry: a color swatch and a calendar name, vertically centred on `cy`."""
-    d.rounded_rectangle((x, cy - 7, x + 14, cy + 7), 3, fill=INK[ink], outline=INK["black"], width=2)
-    put(d, (x + 20, cy), name, font(14), "black", "lm")
+def clock_parts(t: datetime) -> tuple[str, str]:
+    minutes = f":{t.minute:02d}" if t.minute else ""
+    return f"{t.hour % 12 or 12}{minutes}", ("am" if t.hour < 12 else "pm")
 
-
-# ------------------------------------------------------------------- events
 
 def clock(t: datetime) -> str:
     if config.CLOCK_24H:
         return t.strftime("%H:%M")
-    minutes = f":{t.minute:02d}" if t.minute else ""
-    return f"{t.hour % 12 or 12}{minutes}{'a' if t.hour < 12 else 'p'}"
+    number, period = clock_parts(t)
+    return f"{number}{period}"
 
 
 def span(e: Event) -> str:
-    return clock(e.start) if e.end <= e.start else f"{clock(e.start)} – {clock(e.end)}"
+    if e.end <= e.start:
+        return clock(e.start)
+    if config.CLOCK_24H:
+        return f"{clock(e.start)}-{clock(e.end)}"
+    start_num, start_period = clock_parts(e.start)
+    end_num, end_period = clock_parts(e.end)
+    if start_period == end_period:
+        return f"{start_num}-{end_num}{end_period}"
+    return f"{start_num}{start_period}-{end_num}{end_period}"
 
 
-def on_day(events: list[Event], day: date) -> list[Event]:
-    start, end = at(day), at(day + timedelta(days=1))
-    shown = [e for e in events if e.start < end and e.end > start]
-    return sorted(shown, key=lambda e: (not e.all_day, e.start))
+def overlaps(e: Event, day: date) -> bool:
+    return e.start < at(day + timedelta(days=1)) and e.end > at(day)
 
 
-def event_item(e: Event, ink: str, width: int):
-    """(height, paint) for one event: a filled chip if it's all-day, else a color bar beside its time and title."""
+def timed_on_day(events: list[Event], day: date) -> list[Event]:
+    return sorted((e for e in events if not e.all_day and overlaps(e, day)), key=lambda e: e.start)
+
+
+def event_item(e: Event, max_lines: int, columns: int = 1):
+    title_font = sans(FONT_SIZE["event_title"], bold=True)
+
     if e.all_day:
-        lines = wrap(e.title, font(16, True), width - 16, 2)
+        line_h, pad_x, pad_y = EVENT["all_day_line_height"], EVENT["all_day_pad_x"], EVENT["all_day_pad_y"]
+        lines = wrap(e.title, title_font, EVENT_WIDTH - 2 * pad_x, max_lines)
+        height = 2 * pad_y + line_h * len(lines)
+        box_width = EVENT_WIDTH + (columns - 1) * COLUMN_WIDTH
 
         def paint(d, x, y):
-            d.rounded_rectangle((x, y, x + width, y + 10 + 19 * len(lines)), 8, fill=INK[ink])
+            d.rectangle((x, y, x + box_width, y + height), fill=INK[e.ink])
             for n, line in enumerate(lines):
-                put(d, (x + 8, y + 5 + 19 * n), line, font(16, True), text_on(ink))
-        return 10 + 19 * len(lines), paint
+                draw_text(d, (x + pad_x, y + pad_y + line_h * n), line, title_font, text_on(e.ink))
+        return height, paint
 
-    lines = wrap(e.title, font(18), width - 16, 2)
+    line_h = EVENT["timed_line_height"]
+    lines = wrap(e.title, title_font, EVENT_WIDTH - EVENT["text_indent"], max_lines)
+    height = line_h * (len(lines) + 1) + EVENT["timed_pad_y"]
 
     def paint(d, x, y):
-        d.rectangle((x, y + 1, x + 5, y + 19 + 21 * len(lines)), fill=INK[ink])
-        put(d, (x + 13, y), span(e), font(15, True))
+        bar = (x, y + EVENT["bar_top_inset"], x + EVENT["bar_width"], y + height - EVENT["bar_bottom_inset"])
+        d.rectangle(bar, fill=INK[e.ink])
+        text_x = x + EVENT["text_indent"]
         for n, line in enumerate(lines):
-            put(d, (x + 13, y + 19 + 21 * n), line, font(18))
-    return 22 + 21 * len(lines), paint
+            draw_text(d, (text_x, y + line_h * n), line, title_font)
+        draw_text(d, (text_x, y + line_h * len(lines)), span(e), sans(FONT_SIZE["event_time"]))
+    return height, paint
 
 
-def stack(d, x, top, bottom, gap, items):
-    """Place (height, paint) items downwards; say how many were left out if they don't fit."""
+def all_day_rows(events: list[Event], days: list[date], max_lines: int) -> list[list]:
+    spans = []
+    for e in events:
+        if not e.all_day:
+            continue
+        cols = [i for i, day in enumerate(days) if overlaps(e, day)]
+        if cols:
+            spans.append((cols[0], cols[-1], e))
+    spans.sort(key=lambda s: (s[0], s[0] - s[1], s[2].start))  # earliest first, longest first
+
+    rows, last_used = [], []
+    for first, last, e in spans:
+        row = next((r for r, end in enumerate(last_used) if end < first), None)
+        if row is None:
+            row = len(rows)
+            rows.append([])
+            last_used.append(-1)
+        rows[row].append((first, last, event_item(e, max_lines, last - first + 1)))
+        last_used[row] = last
+    return rows
+
+
+def column_tops(rows: list[list], row_heights: list[int]) -> list[int]:
+    tops = [EVENTS_TOP] * DAYS
+    y = EVENTS_TOP
+    for row, height in zip(rows, row_heights):
+        y += height + LAYOUT["event_gap"]
+        for first, last, _ in row:
+            for col in range(first, last + 1):
+                tops[col] = y
+    return tops
+
+
+def fits(items: list, gap: int, available: int) -> bool:
+    if not items:
+        return True
+    return sum(h for h, _ in items) + gap * (len(items) - 1) <= available
+
+
+def stack(d, x: int, items: list, top: int):
+    gap = LAYOUT["event_gap"]
     y = top
     for i, (height, paint) in enumerate(items):
-        room = bottom - (0 if i == len(items) - 1 else MORE_H)
+        is_last = i == len(items) - 1
+        room = EVENTS_BOTTOM - (0 if is_last else LAYOUT["more_height"])
         if y + height > room:
-            put(d, (x + 4, y), f"+{len(items) - i} more", font(14, True))
+            label = f"+{len(items) - i} more"
+            draw_text(d, (x + LAYOUT["more_inset"], y), label, sans(FONT_SIZE["more"], bold=True))
             return
         paint(d, x, y)
         y += height + gap
 
 
-# -------------------------------------------------------------------- layout
-
-def heading(first: date, last: date) -> str:
+def heading_text(first: date, last: date) -> str:
     if first.month == last.month:
-        return f"{first:%B %Y}"
+        return f"{first:%b %Y}".upper()
     if first.year == last.year:
-        return f"{first:%B} - {last:%B %Y}"
-    return f"{first:%B %Y} - {last:%B %Y}"
+        return f"{first:%b}-{last:%b %Y}"
+    return f"{first:%b %Y}-{last:%b %Y}"
 
 
-def draw_heading(d, days: list[date], calendars: list[Calendar], inks: dict[str, str]):
-    put(d, (MARGIN, 10), heading(days[0], days[-1]), font(24, True))
-    if len(calendars) < 2:
-        return
-    names = [wrap(c.name, font(14), 90, 1)[0] for c in calendars]
-    widths = [20 + font(14).getlength(n) + 16 for n in names]
-    while sum(widths) > SIZE[0] - 2 * MARGIN - 300:  # legend, right-aligned; what doesn't fit is left out
+def draw_legend_key(d, x: int, cy: int, name: str, ink: str):
+    size = LEGEND["swatch"]
+    half = size // 2
+    d.rounded_rectangle((x, cy - half, x + size, cy + half), LEGEND["swatch_radius"],
+                        fill=INK[ink], outline=INK["black"], width=LEGEND["swatch_outline"])
+    text_x = x + size + LEGEND["swatch_text_gap"]
+    draw_text(d, (text_x, cy), name, sans(FONT_SIZE["legend"]), "black", "lm")
+
+
+def draw_legend(d, calendars: list[Calendar]):
+    font = sans(FONT_SIZE["legend"])
+    chrome = LEGEND["swatch"] + LEGEND["swatch_text_gap"] + LEGEND["item_gap"]
+    names = [wrap(c.name, font, LEGEND["name_max_width"], 1)[0] for c in calendars]
+    widths = [chrome + font.getlength(n) for n in names]
+    available = SIZE[0] - 2 * LAYOUT["margin"] - LEGEND["reserved_width"]
+    while sum(widths) > available:
         names.pop()
         widths.pop()
-    x = SIZE[0] - MARGIN + 16 - sum(widths)
+    # The last item's trailing gap hangs past the margin so its text lines up with it.
+    x = SIZE[0] - LAYOUT["margin"] + LEGEND["item_gap"] - sum(widths)
     for cal, name, width in zip(calendars, names, widths):
-        key(d, x, 25, name, inks[cal.id])
+        draw_legend_key(d, x, LEGEND["center_y"], name, cal.ink)
         x += width
 
 
-def draw_day(d, i: int, day: date, events: list[Event], inks: dict[str, str]):
-    x = MARGIN + i * COL_W
-    ink = "black"
-    if i == 0:  # today
-        d.rounded_rectangle((x + 2, 46, x + COL_W - 2, 112), 12, fill=INK["black"])
-        ink = "white"
-    put(d, (x + COL_W // 2, 52), f"{day:%A}".upper(), font(15, True), ink, "ma")
-    put(d, (x + COL_W // 2, 70), str(day.day), font(34, True), ink, "ma")
+def draw_page_header(d, days: list[date], calendars: list[Calendar]):
+    draw_text(d, (LAYOUT["margin"], 0), heading_text(days[0], days[-1]), serif(FONT_SIZE["month"]))
+    if len(calendars) >= 2:
+        draw_legend(d, calendars)
 
-    if i:  # dotted divider
-        for y in range(TOP - 2, BOTTOM, 8):
-            d.line((x, y, x, y + 2), fill=INK["black"])
-    stack(d, x + 6, TOP, BOTTOM, 6, [event_item(e, inks[e.calendar], COL_W - 16) for e in events])
+
+def draw_day_headers(d, days: list[date]):
+    number_y = LAYOUT["header_height"] + LAYOUT["day_number_offset"]
+    for i, day in enumerate(days):
+        center = column_x(i) + COLUMN_WIDTH // 2
+        draw_text(d, (center, LAYOUT["header_height"]), f"{day:%A}".upper(),
+                  sans(FONT_SIZE["day_name"], bold=True), anchor="ma")
+        draw_text(d, (center, number_y), str(day.day), serif(FONT_SIZE["day_number"]), anchor="ma")
+
+
+def draw_event_grid(d):
+    start = EVENTS_TOP
+    for i in range(1, DAYS):
+        x = column_x(i)
+        for y in range(start, EVENTS_BOTTOM, DIVIDER["period"]):
+            d.line((x, y, x, y + DIVIDER["dash"]), fill=INK["black"])
+
+
+def draw_events(d, days: list[date], events: list[Event]):
+    gap = LAYOUT["event_gap"]
+    inset = LAYOUT["column_inset"]
+
+    for max_lines in (EVENT["max_lines"], EVENT["compact_max_lines"]):
+        rows = all_day_rows(events, days, max_lines)
+        row_heights = [max(h for _, _, (h, _) in row) for row in rows]
+        tops = column_tops(rows, row_heights)
+        timed = [[event_item(e, max_lines) for e in timed_on_day(events, day)] for day in days]
+        if all(fits(items, gap, EVENTS_BOTTOM - top) for items, top in zip(timed, tops)):
+            break  # if even compact doesn't fit, stack() adds "+N more"
+
+    y = EVENTS_TOP
+    for row, height in zip(rows, row_heights):
+        for first, _, (_, paint) in row:
+            paint(d, column_x(first) + inset, y)
+        y += height + gap
+
+    for i, (items, top) in enumerate(zip(timed, tops)):
+        stack(d, column_x(i) + inset, items, top)
 
 
 def render(today: date, events: list[Event], calendars: list[Calendar]) -> Image.Image:
-    """The finished screen as a palette image (see INK), ready for the display."""
     days = [today + timedelta(days=n) for n in range(DAYS)]
-    inks = assign_inks(calendars)
     img = Image.new("RGB", SIZE, INK["white"])
     d = ImageDraw.Draw(img)
-    draw_heading(d, days, calendars, inks)
-    for i, day in enumerate(days):
-        draw_day(d, i, day, on_day(events, day), inks)
+
+    draw_page_header(d, days, calendars)
+    draw_day_headers(d, days)
+    draw_event_grid(d)
+    draw_events(d, days, events)
 
     palette = Image.new("P", (1, 1))
     palette.putpalette([channel for rgb in INK.values() for channel in rgb])
-    return img.quantize(palette=palette, dither=Image.Dither.NONE)  # snap anti-aliasing to pure colors
+    return img.quantize(palette=palette, dither=Image.Dither.NONE)

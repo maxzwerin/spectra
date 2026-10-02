@@ -1,11 +1,11 @@
 [Unit]
-Description=Calendar dashboard
+Description=Calendar
 After=network-online.target
 Wants=network-online.target
 
 [Service]
 User=USER
-WorkingDirectory=/home/USER/inky/spectra
+WorkingDirectory=/home/USER/spectra
 ExecStart=/home/USER/.virtualenvs/pimoroni/bin/python main.py
 Restart=on-failure
 RestartSec=30
