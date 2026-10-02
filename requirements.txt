@@ -3,3 +3,5 @@ requests
 icalendar
 recurring-ical-events
 emoji
+fontpkg-fira-sans
+fontpkg-instrument-serif

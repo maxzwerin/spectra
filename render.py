@@ -7,8 +7,10 @@ from PIL import Image, ImageDraw, ImageFont
 import config
 from calendars import Calendar, Event, at
 
+import fontpkg
 
-FONTS = Path(__file__).parent / "fonts"
+FIRA_DIR = Path(fontpkg.path("Fira Sans")).parent
+SERIF_PATH = fontpkg.path("Instrument Serif")
 
 SIZE = (800, 480)
 DAYS = 4
@@ -76,13 +78,12 @@ EVENTS_BOTTOM = SIZE[1] - LAYOUT["bottom_margin"]
 
 @lru_cache
 def serif(size: int) -> ImageFont.FreeTypeFont:
-    return ImageFont.truetype(str(FONTS / "InstrumentSerif-Regular.ttf"), size)
-
+    return ImageFont.truetype(str(SERIF_PATH), size)
 
 @lru_cache
 def sans(size: int, bold: bool = False) -> ImageFont.FreeTypeFont:
     name = "Bold" if bold else "Regular"
-    return ImageFont.truetype(str(FONTS / f"FiraSans-{name}.ttf"), size)
+    return ImageFont.truetype(str(FIRA_DIR / f"FiraSans-{name}.ttf"), size)
 
 
 def draw_text(d, xy, text, fnt, ink="black", anchor="la"):
