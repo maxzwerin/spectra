@@ -1,16 +1,8 @@
 # Spectra
 
-A four-day calendar dashboard for a [Pimoroni Inky Impression 7.3"](https://shop.pimoroni.com/products/inky-impression-7-3) e-ink display on a Raspberry Pi. No backlight, almost no power draw between updates.
+A four-day calendar dashboard for a [Pimoroni Inky Impression 7.3"](https://shop.pimoroni.com/products/inky-impression-7-3) e-ink display on a Raspberry Pi.
 
-![Preview](preview.png)
-
-## How it works
-
-- **Four day calendar.** With today the left, followed by the next three days.
-- **No sign-in needed.** Each calendar is a private iCal link from Google Calendar, fetched over HTTPS. No OAuth, no expiring tokens.
-- **Color-coded.** Every calendar gets its own color.
-- **Redraws only when something changed.** It checks every `CHECK_MINUTES`.
-- **On demand.** Press button A on the display to force refresh immediately.
+![Preview coming soon](preview.png)
 
 ## Hardware
 
@@ -47,19 +39,21 @@ pip install -r requirements.txt
 3. Scroll to **Integrate calendar** and copy the **Secret address in iCal format**. It ends in `basic.ics`.
 4. Repeat for each calendar you want to show.
 
+> [!Caution]
 > **Treat these links like passwords.** Anyone with the link can read that calendar. Don't share or commit them.
 
 ### 4. Configure
 
 ```bash
+sudo apt install vim
 cp config.example.py config.py
-nano config.py    # or: sudo apt install vim && vim config.py
+vim config.py
 ```
 
 ```python
 # config.py
 CLOCK_24H = False      # False: 9:30am   True: 09:30
-CHECK_MINUTES = 15     # how often to check for changes
+CHECK_MINUTES = 60     # how often to check for changes
 
 # colors: blue, green, red, yellow, black
 ICS_FEEDS = [
@@ -67,8 +61,6 @@ ICS_FEEDS = [
     {"name": "Family", "url": "https://calendar.google.com/calendar/ical/.../private-yyyy/basic.ics", "color": "red"},
 ]
 ```
-
-`config.py` is gitignored because it holds your private links.
 
 ### 5. Run it
 
@@ -94,16 +86,5 @@ Check that it's running:
 systemctl status calendar
 ```
 
-If your project folder, username, or virtual environment path differ from `~/inky/spectra`, `USER`, and `~/.virtualenvs/pimoroni`, edit `calendar.service` to match before installing it. In particular, check that `WorkingDirectory` points at your clone, or systemd will fail with `status=200/CHDIR`.
-
-## Files
-
-| File | Purpose |
-|---|---|
-| `main.py` | Run loop: fetch, compare, redraw, wait or refresh on a button press |
-| `render.py` | Draws the four-day picture |
-| `calendars.py` | Fetches and parses each calendar in `ICS_FEEDS` |
-| `devices.py` | The physical display and the refresh button |
-| `config.py` | Your calendars and settings (not in git) |
-| `config.example.py` | Template for `config.py` |
-| `calendar.service` | systemd unit for running on boot |
+> [!Note]
+> If your project folder, username, or virtual environment path differ from `~/inky/spectra`, `USER`, and `~/.virtualenvs/pimoroni`, edit `calendar.service` to match.
